@@ -1,0 +1,7 @@
+vk version API: 5.131
+
+SQLAlchemy Version: 2.0.4
+
+Library: vk_api, datetime, random
+
+
