@@ -40,17 +40,6 @@ upload = VkUpload(session)
 session_vk = vk_api.VkApi(token=vk_token)
 
 
-def recive_city_id(city):
-    response = session_vk.method('database.getCities', {
-        'country_id': 1,
-        'q': city,
-        'need_all': 0,
-        'count': 1
-    })
-    city_id = response['items'][0]['id']
-    return city_id
-
-
 def get_age(date):
     age = datetime.datetime.now().year-int(date[-4:])
     return age
@@ -63,7 +52,7 @@ def get_user_info(user_id):
         'v': 5.131,
         'fields': 'first_name, last_name, bdate, sex, city, country'
     })
-    if response:
+    try:
         for key, value in response[0].items():
             if key == 'city':
                 user_info[key] = value['id']
@@ -72,7 +61,7 @@ def get_user_info(user_id):
             else:
                 user_info[key] = value
         return user_info
-    else:
+    except KeyError:
         write_msg(user_id, 'Ошибка')
         return False
 
@@ -106,14 +95,13 @@ def add_city(user_id):
         write_msg(user_id, 'Недостаточно информации, введите город в Именительном падеже')
         for event in VkLongPoll(session).listen():
             if event.type == VkEventType.MESSAGE_NEW and event.to_me:
+                response = session_vk.method('database.getCities', {
+                    'country_id': 1,
+                    'q': event.text,
+                    'need_all': 0,
+                    'count': 1
+                })
                 try:
-                    response = session_vk.method('database.getCities', {
-                        'country_id': 1,
-                        'q': event.text,
-                        'need_all': 0,
-                        'count': 1
-                    })
-
                     if response['count'] == 0:
                         write_msg(user_id, 'Город указан неверно, введите город в именительном падеже')
                     else:
@@ -121,36 +109,30 @@ def add_city(user_id):
                         a = True
                         return user_info
 
-                except Exception as e:
-                    # write_msg(user_id, 'Ошибка, попробуйте позже')
-                    print(e)
-                    a = True
+                except KeyError:
                     return None
 
 
 def serch_users(user_info):
-    try:
-        response = session_vk.method('users.search', {
-        # response = session_vk.method('users.search', {
-            'age_from': user_info['age']-3,
-            'age_to': user_info['age']+3,
-            'sort': 0,
-            'count': 100,
-            'city': user_info['city'],
-            'sex': 3 - user_info['sex'],
-            'status': 6,
-            'has_photo': 1})
-
-    except Exception as e:
-        print(e)
-        return None
+    response = session_vk.method('users.search', {
+        'age_from': user_info['age']-3,
+        'age_to': user_info['age']+3,
+        'sort': 0,
+        'count': 100,
+        'city': user_info['city'],
+        'sex': 3 - user_info['sex'],
+        'status': 6,
+        'has_photo': 1})
 
     list_users_id = []
-    if len(response['items']) != 0:
-        for item in response['items']:
-            if item['is_closed'] is False:
-                list_users_id.append(item['id'])
-    return list_users_id
+    try:
+        if len(response['items']) != 0:
+            for item in response['items']:
+                if item['is_closed'] is False:
+                    list_users_id.append(item['id'])
+        return list_users_id
+    except KeyError:
+        return None
 
 
 def check_id(list_users_id):
@@ -188,37 +170,37 @@ def serch_popular(response):
 # функция для поиска фото и формирования списка вложений
 def get_fotos_info(list_users_id):
     info_fotos_for_upload = {}
+    response = session_vk.method('photos.get', {
+        'owner_id': list_users_id[0],
+        'album_id': 'profile',
+        'extended': 1})
+
     try:
-        response = session_vk.method('photos.get', {
-            'owner_id': list_users_id[0],
-            'album_id': 'profile',
-            'extended': 1})
-    except Exception as e:
-        print(e)
+        popular_list = serch_popular(response)
+
+        info_ids_fotos = []  # в следующем цикле от каждой популярной фото берем id фото и пользователя
+        for item in popular_list:
+            info_ids_fotos.append(item['id'])
+        info_fotos_for_upload[popular_list[0]['owner_id']] = info_ids_fotos
+
+        # создаем формат для вложений из фото
+
+        person = list_users_id[0]
+
+        list_foto_attachments = []  # список вложений каждого отдельного пользователя формата ['photo7097751_266247043',..]
+        for couple in info_fotos_for_upload[person]:
+            list_foto_attachments.append(f'photo{person}_{couple}')
+
+        list_attach = []
+        foto_link = ','.join(list_foto_attachments)
+        list_attach.append(foto_link)
+        list_attach.append(person)
+
+        del list_users_id[0]  # удаляем это ай ди чтобы при следующем сообщении пользователю отправлялся другой человек
+        return list_attach
+
+    except KeyError:
         return None
-
-    popular_list = serch_popular(response)
-
-    info_ids_fotos = []  # в следующем цикле от каждой популярной фото берем id фото и пользователя
-    for item in popular_list:
-        info_ids_fotos.append(item['id'])
-    info_fotos_for_upload[popular_list[0]['owner_id']] = info_ids_fotos
-
-    # создаем формат для вложений из фото
-
-    person = list_users_id[0]
-
-    list_foto_attachments = []  # список вложений каждого отдельного пользователя формата ['photo7097751_266247043',..]
-    for couple in info_fotos_for_upload[person]:
-        list_foto_attachments.append(f'photo{person}_{couple}')
-
-    list_attach = []
-    foto_link = ','.join(list_foto_attachments)
-    list_attach.append(foto_link)
-    list_attach.append(person)
-
-    del list_users_id[0]  # удаляем это ай ди чтобы при следующем сообщении пользователю отправлялся другой человек
-    return list_attach
 
 
 # функция для отправки текста сообщения
